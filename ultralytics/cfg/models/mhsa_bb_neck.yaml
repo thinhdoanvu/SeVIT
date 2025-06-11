@@ -1,0 +1,52 @@
+# Image size = 640x640x3
+
+# Parameters
+nc: 80  # number of classes
+depth_multiple: 1  # scales module repeats
+width_multiple: 1  # scales convolution channels
+
+# YOLOv8.0n backbone
+backbone:
+  # [from, repeats, module, args]
+
+  - [-1, 1, Conv, [64, 3, 2]]                       # 0-P1/2    320x320x64
+  - [-1, 1, Conv, [128, 3, 2]]                      # 1-P2/4    160x160x128
+  - [-1, 3, C2f, [128, True]]
+  - [-1, 1, Conv, [256, 3, 2]]                      # 3-P3/8    80x80x256
+  - [-1, 1,MyMHSA, [256, 512, 6400, 256]]           # 4:        80x80x512 
+  - [-1, 6, C2f, [256, True]]
+  - [-1, 1, Conv, [512, 3, 2]]                      # 6-P4/16   40x40x512
+  - [-1, 1,MyMHSA, [512, 1024, 1600, 512]]          # 7:        40x40x1024 
+  - [-1, 6, C2f, [512, True]]
+  - [-1, 1, Conv, [1024, 3, 2]]                     # 9-P5/32   20x20x1024
+  - [-1, 1,MyMHSA, [1024, 2048, 400, 1024]]         # 10:       20x20x2048 
+  - [-1, 3, C2f, [1024, True]]
+  - [-1, 1, SPPF, [1024, 5]]                        # 12:       20x20x1024
+  
+  # MHSA: c1: output previous chanel, c2: 2x c1, sequence_length: w x h input, d:output previous chanel = c1
+  # MHSA = concat(input C2f (1024) + MSA (1024) + SEBLOCK)= (2048 + Khong anh huong)
+  # Khong hieu sao khi Detect thi loi tensor nen tam thoi trong module MyMHSA bo qua PositionalEmbedding
+  
+# YOLOv8.0n head
+head:
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]      # 13: 40x40x1024
+  - [8, 1, MyMHSA, [512, 1024, 1600, 512]]          # 14: 40x40x1024
+  - [-1, 3, C2f, [512]]
+  - [[-1, 13], 1, Concat, [1]]                       # 16: cat backbone C2F(MHSA-P4): 40x40x1536
+  - [-1, 3, C2f, [512]]             
+
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]      # 18: 80x80x512
+  - [5, 1, MyMHSA, [256, 512, 6400, 256]]           # 19: 80x80x512
+  - [-1, 3, C2f, [256]]
+  - [[-1, 18], 1, Concat, [1]]                      # 21: cat backbone C2F(MHSA-P3): 80x80x768
+  - [-1, 3, C2f, [256]]                             # 22: (P3/8-small): 80x80x256
+
+  - [-1, 1, Conv, [256, 3, 2]]
+  - [[-1, 17], 1, Concat, [1]]                      # 24: cat C2F(Concat-SPPF4): 40x40x768
+  - [-1, 3, C2f, [512]]                             # 25: (P4/16-medium): 40x40x512
+
+  - [-1, 1, Conv, [512, 3, 2]]
+  - [[-1, 12], 1, Concat, [1]]                      # 27: cat C2F(SPPF): 20x20x1536
+  - [-1, 3, C2f, [1024]]                            # 28: (P5/32-large): 20x20x1024
+
+  - [[20, 25, 28], 1, Detect, [nc]]                 # 29: Detect(P3, P4, P5) 18 23 26
